@@ -649,6 +649,7 @@ export async function runConsultTool(
       executeBrowser: createRemoteBrowserExecutor({
         host: resolvedRemote.host,
         token: resolvedRemote.token,
+        attachmentRoots: userConfig.browser?.remoteAttachmentRoots,
       }),
     };
   }

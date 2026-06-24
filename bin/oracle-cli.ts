@@ -940,6 +940,12 @@ program
     "--manual-login-profile-dir <path>",
     "Chrome profile directory for manual login (default ~/.oracle/browser-profile).",
   )
+  .option(
+    "--remote-attachment-root <paths...>",
+    "Allow oracle serve to read attachment paths under these shared directories.",
+    collectPaths,
+    [],
+  )
   .action(async (commandOptions) => {
     const { serveRemote } = await import("../src/remote/server.js");
     await serveRemote({
@@ -948,6 +954,7 @@ program
       token: commandOptions.token,
       manualLoginDefault: commandOptions.manualLogin,
       manualLoginProfileDir: commandOptions.manualLoginProfileDir,
+      remoteAttachmentRoots: commandOptions.remoteAttachmentRoot,
     });
   });
 
@@ -2211,7 +2218,11 @@ async function runRootCommand(options: CliOptions): Promise<void> {
   if (browserConfig && remoteHost) {
     const { createRemoteBrowserExecutor } = await import("../src/remote/client.js");
     browserDeps = {
-      executeBrowser: createRemoteBrowserExecutor({ host: remoteHost, token: remoteToken }),
+      executeBrowser: createRemoteBrowserExecutor({
+        host: remoteHost,
+        token: remoteToken,
+        attachmentRoots: userConfig.browser?.remoteAttachmentRoots,
+      }),
     };
     console.log(chalk.dim(`Routing browser automation to remote host ${remoteHost}`));
   } else if (browserConfig && activeModel.startsWith("gemini")) {
@@ -2532,7 +2543,11 @@ async function restartSession(sessionId: string, options: RestartCommandOptions)
   if (browserConfig && remoteHost) {
     const { createRemoteBrowserExecutor } = await import("../src/remote/client.js");
     browserDeps = {
-      executeBrowser: createRemoteBrowserExecutor({ host: remoteHost, token: remoteToken }),
+      executeBrowser: createRemoteBrowserExecutor({
+        host: remoteHost,
+        token: remoteToken,
+        attachmentRoots: userConfig.browser?.remoteAttachmentRoots,
+      }),
     };
     console.log(chalk.dim(`Routing browser automation to remote host ${remoteHost}`));
   } else if (browserConfig && runOptions.model.startsWith("gemini")) {

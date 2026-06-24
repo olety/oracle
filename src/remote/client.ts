@@ -6,24 +6,34 @@ import type { BrowserRunResult } from "../browserMode.js";
 import type { BrowserAttachment } from "../browser/types.js";
 import type { RemoteRunPayload, RemoteRunEvent, RemoteAttachmentPayload } from "./types.js";
 import { parseHostPort } from "../bridge/connection.js";
+import { normalizeAttachmentRoots, resolvePathInAttachmentRoots } from "./attachmentRoots.js";
 
 interface RemoteExecutorOptions {
   host: string;
   token?: string;
+  attachmentRoots?: string[];
 }
 
-export function createRemoteBrowserExecutor({ host, token }: RemoteExecutorOptions) {
+export function createRemoteBrowserExecutor({
+  host,
+  token,
+  attachmentRoots,
+}: RemoteExecutorOptions) {
   // Return a drop-in replacement for runBrowserMode so the browser session runner can stay unchanged.
   return async function remoteBrowserExecutor(
     options: BrowserRunOptions,
   ): Promise<BrowserRunResult> {
+    const normalizedAttachmentRoots = await normalizeAttachmentRoots(attachmentRoots ?? []);
     const payload: RemoteRunPayload = {
       prompt: options.prompt,
-      attachments: await serializeAttachments(options.attachments ?? []),
+      attachments: await serializeAttachments(options.attachments ?? [], normalizedAttachmentRoots),
       fallbackSubmission: options.fallbackSubmission
         ? {
             prompt: options.fallbackSubmission.prompt,
-            attachments: await serializeAttachments(options.fallbackSubmission.attachments ?? []),
+            attachments: await serializeAttachments(
+              options.fallbackSubmission.attachments ?? [],
+              normalizedAttachmentRoots,
+            ),
           }
         : undefined,
       browserConfig: options.config ?? {},
@@ -99,10 +109,21 @@ export function createRemoteBrowserExecutor({ host, token }: RemoteExecutorOptio
 
 async function serializeAttachments(
   attachments: BrowserAttachment[],
+  attachmentRoots: readonly string[],
 ): Promise<RemoteAttachmentPayload[]> {
   const serialized: RemoteAttachmentPayload[] = [];
   for (const attachment of attachments) {
-    // Read the local file upfront so the remote host never touches the caller's filesystem.
+    const serverPath = await resolvePathInAttachmentRoots(attachment.path, attachmentRoots);
+    if (serverPath) {
+      serialized.push({
+        fileName: path.basename(serverPath),
+        displayPath: attachment.displayPath,
+        sizeBytes: attachment.sizeBytes,
+        serverPath,
+      });
+      continue;
+    }
+
     const content = await readFile(attachment.path);
     serialized.push({
       fileName: path.basename(attachment.path),

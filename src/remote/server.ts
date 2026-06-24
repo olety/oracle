@@ -4,7 +4,7 @@ import path from "node:path";
 import net from "node:net";
 import { randomBytes, randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, stat } from "node:fs/promises";
 import chalk from "chalk";
 import type { BrowserAttachment, BrowserLogger, CookieParam } from "../browser/types.js";
 import { runBrowserMode } from "../browserMode.js";
@@ -13,6 +13,7 @@ import type { RemoteRunPayload, RemoteRunEvent } from "./types.js";
 import { getCookies, type Cookie } from "@steipete/sweet-cookie";
 import { CHATGPT_URL } from "../browser/constants.js";
 import { getCliVersion } from "../version.js";
+import { loadUserConfig } from "../config.js";
 import {
   cleanupStaleProfileState,
   readDevToolsPort,
@@ -21,6 +22,7 @@ import {
   writeDevToolsActivePort,
 } from "../browser/profileState.js";
 import { normalizeChatgptUrl } from "../browser/utils.js";
+import { normalizeAttachmentRoots, resolvePathInAttachmentRoots } from "./attachmentRoots.js";
 
 export interface RemoteServerOptions {
   host?: string;
@@ -29,6 +31,7 @@ export interface RemoteServerOptions {
   logger?: (message: string) => void;
   manualLoginDefault?: boolean;
   manualLoginProfileDir?: string;
+  remoteAttachmentRoots?: string[];
 }
 
 interface RemoteServerDeps {
@@ -65,6 +68,7 @@ export async function createRemoteServer(
   const server = http.createServer();
   const logger = options.logger ?? console.log;
   const authToken = options.token ?? randomBytes(16).toString("hex");
+  const remoteAttachmentRoots = await normalizeAttachmentRoots(options.remoteAttachmentRoots ?? []);
   const startedAt = Date.now();
   const verbose = process.argv.includes("--verbose") || process.env.ORACLE_SERVE_VERBOSE === "1";
   const color = process.stdout.isTTY
@@ -179,14 +183,15 @@ export async function createRemoteServer(
     try {
       const attachmentsPayload = Array.isArray(payload.attachments) ? payload.attachments : [];
       for (const [index, attachment] of attachmentsPayload.entries()) {
-        const safeName = sanitizeName(attachment.fileName ?? `attachment-${index + 1}`);
-        const filePath = path.join(attachmentDir, safeName);
-        await writeFile(filePath, Buffer.from(attachment.contentBase64, "base64"));
-        attachments.push({
-          path: filePath,
-          displayPath: attachment.displayPath,
-          sizeBytes: attachment.sizeBytes,
-        });
+        attachments.push(
+          await materializeRemoteAttachment({
+            attachment,
+            fallbackName: `attachment-${index + 1}`,
+            targetDir: attachmentDir,
+            roots: remoteAttachmentRoots,
+            maxFileSizeBytes: payload.options.maxFileSizeBytes,
+          }),
+        );
       }
 
       if (payload.fallbackSubmission) {
@@ -197,14 +202,15 @@ export async function createRemoteServer(
           ? payload.fallbackSubmission.attachments
           : [];
         for (const [index, attachment] of fallbackPayload.entries()) {
-          const safeName = sanitizeName(attachment.fileName ?? `fallback-attachment-${index + 1}`);
-          const filePath = path.join(fallbackAttachmentDir, safeName);
-          await writeFile(filePath, Buffer.from(attachment.contentBase64, "base64"));
-          fallbackAttachments.push({
-            path: filePath,
-            displayPath: attachment.displayPath,
-            sizeBytes: attachment.sizeBytes,
-          });
+          fallbackAttachments.push(
+            await materializeRemoteAttachment({
+              attachment,
+              fallbackName: `fallback-attachment-${index + 1}`,
+              targetDir: fallbackAttachmentDir,
+              roots: remoteAttachmentRoots,
+              maxFileSizeBytes: payload.options.maxFileSizeBytes,
+            }),
+          );
         }
         fallbackSubmission = {
           prompt: payload.fallbackSubmission.prompt,
@@ -299,6 +305,11 @@ export async function createRemoteServer(
 }
 
 export async function serveRemote(options: RemoteServerOptions = {}): Promise<void> {
+  const { config } = await loadUserConfig({ includeProject: false });
+  const remoteAttachmentRoots =
+    options.remoteAttachmentRoots && options.remoteAttachmentRoots.length > 0
+      ? options.remoteAttachmentRoots
+      : (config.browser?.remoteAttachmentRoots ?? []);
   const manualProfileDir =
     options.manualLoginProfileDir ?? path.join(os.homedir(), ".oracle", "browser-profile");
   const preferManualLogin = options.manualLoginDefault || process.platform === "win32" || isWsl();
@@ -373,6 +384,7 @@ export async function serveRemote(options: RemoteServerOptions = {}): Promise<vo
 
   const server = await createRemoteServer({
     ...options,
+    remoteAttachmentRoots,
     manualLoginDefault: preferManualLogin,
     manualLoginProfileDir: manualProfileDir,
   });
@@ -395,6 +407,65 @@ async function readRequestBody(req: http.IncomingMessage): Promise<string> {
     chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
   }
   return Buffer.concat(chunks).toString("utf8");
+}
+
+async function materializeRemoteAttachment({
+  attachment,
+  fallbackName,
+  targetDir,
+  roots,
+  maxFileSizeBytes,
+}: {
+  attachment: {
+    fileName?: string;
+    displayPath: string;
+    sizeBytes?: number;
+    contentBase64?: string;
+    serverPath?: string;
+  };
+  fallbackName: string;
+  targetDir: string;
+  roots: readonly string[];
+  maxFileSizeBytes?: number;
+}): Promise<BrowserAttachment> {
+  if (attachment.serverPath) {
+    const serverPath = await resolvePathInAttachmentRoots(attachment.serverPath, roots);
+    if (!serverPath) {
+      throw new Error(`Attachment path is not inside an allowed remote attachment root.`);
+    }
+    const stats = await stat(serverPath);
+    if (!stats.isFile()) {
+      throw new Error(`Attachment path is not a file: ${serverPath}`);
+    }
+    assertAttachmentSize(serverPath, stats.size, maxFileSizeBytes);
+    return {
+      path: serverPath,
+      displayPath: attachment.displayPath,
+      sizeBytes: stats.size,
+    };
+  }
+
+  if (attachment.contentBase64 === undefined) {
+    throw new Error("Remote attachment payload is missing content.");
+  }
+  const safeName = sanitizeName(attachment.fileName ?? fallbackName);
+  const filePath = path.join(targetDir, safeName);
+  const content = Buffer.from(attachment.contentBase64, "base64");
+  assertAttachmentSize(attachment.displayPath, content.length, maxFileSizeBytes);
+  await writeFile(filePath, content);
+  return {
+    path: filePath,
+    displayPath: attachment.displayPath,
+    sizeBytes: content.length,
+  };
+}
+
+function assertAttachmentSize(filePath: string, sizeBytes: number, maxFileSizeBytes?: number) {
+  if (maxFileSizeBytes && sizeBytes > maxFileSizeBytes) {
+    throw new Error(
+      `Attachment ${path.basename(filePath)} exceeds the configured ${maxFileSizeBytes}-byte limit (${sizeBytes} bytes).`,
+    );
+  }
 }
 
 function sanitizeName(raw: string): string {

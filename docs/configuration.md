@@ -29,6 +29,7 @@ JSON5 parsing, so trailing commas and comments are allowed.
     // Remote browser bridge (preferred place to store remote host settings)
     remoteHost: "127.0.0.1:9473",
     remoteToken: "…", // written by `oracle bridge client` (kept private; not printed by default)
+    remoteAttachmentRoots: ["/Users/you/OracleUploads"], // shared folders oracle serve may read attachments from
     remoteViaSshReverseTunnel: { ssh: "user@linux-host", remotePort: 9473 }, // optional metadata
     debugPort: null, // fixed DevTools port (env: ORACLE_BROWSER_PORT / ORACLE_BROWSER_DEBUG_PORT)
     timeoutMs: 1200000,
@@ -109,6 +110,7 @@ CLI flags and explicit override environment variables → effective config (proj
 - `ORACLE_ENGINE=api|browser` is a global override for engine selection (useful for MCP/Codex setups); it wins over `config.json`.
 - If `azure.endpoint` (or `--azure-endpoint`) is set, Oracle reads `AZURE_OPENAI_API_KEY` first and falls back to `OPENAI_API_KEY` for GPT models.
 - Remote browser defaults follow the same order: `--remote-host/--remote-token` win, then `browser.remoteHost` / `browser.remoteToken` in the config, then `ORACLE_REMOTE_HOST` / `ORACLE_REMOTE_TOKEN` if still unset.
+- `browser.remoteAttachmentRoots` lets `oracle serve` read large attachments from shared folders instead of receiving base64 JSON payloads. Configure the same root on the client and server, place the archive under that folder, and Oracle sends an allowlisted server-side path. Project `.oracle/config.json` files cannot set this field.
 - `OPENAI_API_KEY` only influences engine selection when neither the CLI nor `config.json` specify an engine (API when present, otherwise browser).
 - `ORACLE_NOTIFY*` env vars still layer on top of the config’s `notify` block.
 - `sessionRetentionHours` controls the default value for `--retain-hours`. When unset, `ORACLE_RETAIN_HOURS` (if present) becomes the fallback, and the CLI flag still wins over both.

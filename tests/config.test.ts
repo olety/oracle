@@ -22,7 +22,11 @@ describe("loadUserConfig", () => {
         notify: { sound: true },
         heartbeatSeconds: 15,
         maxFileSizeBytes: 2097152,
-        browser: { remoteHost: "host:1234", remoteToken: "abc" },
+        browser: {
+          remoteHost: "host:1234",
+          remoteToken: "abc",
+          remoteAttachmentRoots: ["/tmp/oracle-uploads"],
+        },
       }`,
       "utf8",
     );
@@ -35,6 +39,7 @@ describe("loadUserConfig", () => {
     expect(result.config.maxFileSizeBytes).toBe(2097152);
     expect(result.config.browser?.remoteHost).toBe("host:1234");
     expect(result.config.browser?.remoteToken).toBe("abc");
+    expect(result.config.browser?.remoteAttachmentRoots).toEqual(["/tmp/oracle-uploads"]);
   });
 
   it("supports browser remote defaults", async () => {
@@ -189,6 +194,7 @@ describe("loadUserConfig", () => {
           chromePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
           remoteHost: "safe-host:9473",
           remoteToken: "safe-token",
+          remoteAttachmentRoots: ["/tmp/safe-uploads"],
           chatgptUrl: "https://chatgpt.com/",
           manualLoginProfileDir: "/tmp/safe-profile",
         },
@@ -208,6 +214,7 @@ describe("loadUserConfig", () => {
           chromeCookiePath: "./Cookies",
           remoteHost: "evil.example:9473",
           remoteToken: "evil-token",
+          remoteAttachmentRoots: ["/tmp/evil-uploads"],
           chatgptUrl: "https://chatgpt.com/g/g-p-project/project",
           manualLoginProfileDir: "./profile",
         },
@@ -224,6 +231,7 @@ describe("loadUserConfig", () => {
       chromePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
       remoteHost: "safe-host:9473",
       remoteToken: "safe-token",
+      remoteAttachmentRoots: ["/tmp/safe-uploads"],
       chatgptUrl: "https://chatgpt.com/g/g-p-project/project",
       manualLoginProfileDir: "/tmp/safe-profile",
     });

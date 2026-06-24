@@ -3,7 +3,7 @@ import http from "node:http";
 import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
-import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile, realpath } from "node:fs/promises";
 import { createRemoteServer } from "../../src/remote/server.js";
 import { createRemoteBrowserExecutor } from "../../src/remote/client.js";
 import type { BrowserRunResult } from "../../src/browserMode.js";
@@ -116,6 +116,61 @@ describe("remote browser service", () => {
 
       await server.close();
       await rm(tmpDir, { recursive: true, force: true });
+    },
+  );
+
+  test.skipIf(!CAN_LISTEN_LOCALHOST)(
+    "uses shared server paths for attachments inside configured roots",
+    async () => {
+      const tmpDir = await mkdtemp(path.join(os.tmpdir(), "oracle-remote-root-test-"));
+      const attachmentPath = path.join(tmpDir, "large.zip");
+      await writeFile(attachmentPath, "server-side attachment", "utf8");
+      const realAttachmentPath = await realpath(attachmentPath);
+
+      const server = await createRemoteServer(
+        {
+          host: "127.0.0.1",
+          port: 0,
+          token: "secret",
+          logger: () => {},
+          remoteAttachmentRoots: [tmpDir],
+        },
+        {
+          runBrowser: async (options) => {
+            expect(options.attachments).toHaveLength(1);
+            const attachment = options.attachments?.[0];
+            if (!attachment) {
+              throw new Error("missing attachment");
+            }
+            expect(attachment.path).toBe(realAttachmentPath);
+            expect(await readFile(attachment.path, "utf8")).toBe("server-side attachment");
+            return {
+              answerText: "ok",
+              answerMarkdown: "ok",
+              tookMs: 1,
+              answerTokens: 1,
+              answerChars: 2,
+            };
+          },
+        },
+      );
+
+      try {
+        const executor = createRemoteBrowserExecutor({
+          host: `127.0.0.1:${server.port}`,
+          token: "secret",
+          attachmentRoots: [tmpDir],
+        });
+        const result = await executor({
+          prompt: "remote shared path",
+          attachments: [{ path: attachmentPath, displayPath: "large.zip", sizeBytes: 22 }],
+          config: {},
+        });
+        expect(result.answerText).toBe("ok");
+      } finally {
+        await server.close();
+        await rm(tmpDir, { recursive: true, force: true });
+      }
     },
   );
 });

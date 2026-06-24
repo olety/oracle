@@ -31,6 +31,8 @@ export interface BrowserConfigDefaults {
   remoteToken?: string | null;
   /** Optional metadata for the SSH reverse-tunnel that makes remoteHost reachable. */
   remoteViaSshReverseTunnel?: RemoteViaSshReverseTunnelConfig | null;
+  /** Shared directories the remote browser service may read attachment paths from. */
+  remoteAttachmentRoots?: string[];
   timeoutMs?: number;
   debugPort?: number | null;
   inputTimeoutMs?: number;

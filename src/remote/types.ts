@@ -6,7 +6,8 @@ export interface RemoteAttachmentPayload {
   fileName: string;
   displayPath: string;
   sizeBytes?: number;
-  contentBase64: string;
+  contentBase64?: string;
+  serverPath?: string;
 }
 
 export interface RemoteRunPayload {
@@ -33,5 +34,6 @@ export type RemoteRunEvent =
 
 export interface SerializedAttachment extends BrowserAttachment {
   fileName: string;
-  contentBase64: string;
+  contentBase64?: string;
+  serverPath?: string;
 }
